@@ -17,7 +17,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Preparar icono oficial EMHA
+      - name: Preparar icono EMHA a tamaño completo
         run: |
           curl --fail --location --retry 3 --output /tmp/emha-icon.png https://control-actividades-hamashiaj.web.app/icons/icon-512.png
           python3 -m pip install --user Pillow
@@ -25,6 +25,10 @@ jobs:
           from PIL import Image
           from pathlib import Path
           source = Image.open('/tmp/emha-icon.png').convert('RGBA')
+          # Recorte de márgenes exteriores: el logo ocupa más superficie del icono.
+          w, h = source.size
+          margin = round(min(w, h) * 0.04)
+          source = source.crop((margin, margin, w - margin, h - margin))
           for folder, size in [('mipmap-mdpi',48),('mipmap-hdpi',72),('mipmap-xhdpi',96),('mipmap-xxhdpi',144),('mipmap-xxxhdpi',192)]:
               target = Path('app/src/main/res') / folder
               target.mkdir(parents=True, exist_ok=True)
