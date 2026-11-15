@@ -17,22 +17,64 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Preparar icono EMHA a tamaño completo
+      - name: Preparar icono EMHA sin bordes blancos
         run: |
           curl --fail --location --retry 3 --output /tmp/emha-icon.png https://control-actividades-hamashiaj.web.app/icons/icon-512.png
           python3 -m pip install --user Pillow
           python3 - <<'PY'
-          from PIL import Image
+          from PIL import Image, ImageDraw
           from pathlib import Path
+          from collections import deque
           source = Image.open('/tmp/emha-icon.png').convert('RGBA')
-          # Recorte de márgenes exteriores: el logo ocupa más superficie del icono.
-          w, h = source.size
-          margin = round(min(w, h) * 0.04)
-          source = source.crop((margin, margin, w - margin, h - margin))
+          # Quitar únicamente el fondo blanco conectado a los bordes;
+          # nunca borrar el blanco interior del águila ni de las letras.
+          pixels = source.load()
+          w,h = source.size
+          visited = set()
+          queue = deque()
+          for x in range(w):
+              queue.extend(((x,0),(x,h-1)))
+          for y in range(h):
+              queue.extend(((0,y),(w-1,y)))
+          while queue:
+              x,y = queue.popleft()
+              if (x,y) in visited or x<0 or y<0 or x>=w or y>=h:
+                  continue
+              visited.add((x,y))
+              r,g,b,a = pixels[x,y]
+              if a < 20 or (r>225 and g>225 and b>225):
+                  pixels[x,y] = (0,0,0,0)
+                  queue.extend(((x-1,y),(x+1,y),(x,y-1),(x,y+1)))
+          bbox = source.getbbox()
+          if bbox:
+              source = source.crop(bbox)
+          navy=(2,17,26,255)
+          def render(size, fraction):
+              canvas=Image.new('RGBA',(size,size),navy)
+              max_dim=round(size*fraction)
+              scale=min(max_dim/source.width,max_dim/source.height)
+              resized=source.resize((max(1,round(source.width*scale)),max(1,round(source.height*scale))),Image.Resampling.LANCZOS)
+              canvas.alpha_composite(resized,((size-resized.width)//2,(size-resized.height)//2))
+              return canvas
+          # Legacy: el diseño ocupa prácticamente todo el cuadrado.
           for folder, size in [('mipmap-mdpi',48),('mipmap-hdpi',72),('mipmap-xhdpi',96),('mipmap-xxhdpi',144),('mipmap-xxxhdpi',192)]:
-              target = Path('app/src/main/res') / folder
-              target.mkdir(parents=True, exist_ok=True)
-              source.resize((size,size),Image.Resampling.LANCZOS).save(target/'ic_launcher.png')
+              target=Path('app/src/main/res')/folder
+              target.mkdir(parents=True,exist_ok=True)
+              render(size,.96).save(target/'ic_launcher.png')
+          # Adaptive: fondo azul oscuro a toda el área; contenido completo dentro
+          # de la máscara circular/redondeada del fabricante.
+          for folder,size in [('drawable-mdpi',108),('drawable-hdpi',162),('drawable-xhdpi',216),('drawable-xxhdpi',324),('drawable-xxxhdpi',432)]:
+              target=Path('app/src/main/res')/folder
+              target.mkdir(parents=True,exist_ok=True)
+              render(size,.72).save(target/'emha_adaptive.png')
+          target=Path('app/src/main/res/mipmap-anydpi-v26')
+          target.mkdir(parents=True,exist_ok=True)
+          (target/'ic_launcher.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/emha_adaptive"/>
+              <foreground android:drawable="@android:color/transparent"/>
+          </adaptive-icon>
+          ''')
           PY
       - name: Compilar APK
         run: gradle --no-daemon assembleDebug
